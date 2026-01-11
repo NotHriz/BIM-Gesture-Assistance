@@ -2,33 +2,27 @@ import cv2
 import mediapipe as mp
 import os
 import pandas as pd
+import numpy as np  # Needed for noisy_coords
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-
 
 # 1. Setup the Hand Landmarker
 base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
-    running_mode=vision.RunningMode.IMAGE, # Use IMAGE mode for static files
-    num_hands=2
+    running_mode=vision.RunningMode.IMAGE,
+    num_hands=2 # Detect up to 2
 )
-
-# Initialize the detector
 detector = vision.HandLandmarker.create_from_options(options)
 
-DATASET_PATH = 'App\data\mydatabase' # Update this to your folder
+DATASET_PATH = r'App\data\mydatabase'
 output_data = []
 
 # Force Alphabetical Order
 labels = sorted([f for f in os.listdir(DATASET_PATH) if os.path.isdir(os.path.join(DATASET_PATH, f))])
 
-
-# 2. Loop through each folder (Word)
-for label in os.listdir(DATASET_PATH):
+for label in labels:
     label_path = os.path.join(DATASET_PATH, label)
-    if not os.path.isdir(label_path): continue
-    
     print(f"Processing word: {label}")
     
     for img_name in os.listdir(label_path):
@@ -36,32 +30,35 @@ for label in os.listdir(DATASET_PATH):
         image = cv2.imread(img_path)
         if image is None: continue
 
-        # Convert to MediaPipe format
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        
-        # 3. Extract Landmarks
         detection_result = detector.detect(mp_image)
 
         if detection_result.hand_landmarks:
-            # We only need the first hand detected
-            hand = detection_result.hand_landmarks[0]
-            coords = []
-            for lm in hand:
-                coords.extend([lm.x, lm.y]) # Adds x and y (42 total)
+            # --- 2-HAND LOGIC ---
+            # Create a blank list of 84 zeros
+            all_coords = [0.0] * 84 
             
-            # Add the label (the word) to the end
-            coords.append(label)
-            output_data.append(coords)
+            for hand_idx, hand_landmarks in enumerate(detection_result.hand_landmarks):
+                if hand_idx >= 2: break # Only take first 2 hands
+                
+                offset = hand_idx * 42
+                for i, lm in enumerate(hand_landmarks):
+                    all_coords[offset + (i * 2)] = lm.x
+                    all_coords[offset + (i * 2) + 1] = lm.y
             
-    # 1. Add a "Noisy" version (simulates shaky hands)
-    noisy_coords = [c + np.random.normal(0, 0.005) for c in coords]
-    output_data.append(noisy_coords + [label])
+            # Save original
+            output_data.append(all_coords + [label])
 
-    # 2. Add a "Scaled" version (simulates closer/further hand)
-    scaled_coords = [c * 1.05 for c in coords]
-    output_data.append(scaled_coords + [label])
+            # --- DATA AUGMENTATION (Inside the loop!) ---
+            # 1. Noisy version
+            noisy = [c + np.random.normal(0, 0.002) if c != 0 else 0 for c in all_coords]
+            output_data.append(noisy + [label])
+
+            # 2. Scaled version
+            scaled = [c * 1.02 if c != 0 else 0 for c in all_coords]
+            output_data.append(scaled + [label])
 
 # 4. Save to CSV
 df = pd.DataFrame(output_data)
 df.to_csv('malay_sign_lang_coords.csv', index=False, header=False)
-print(f"Finished! Saved {len(df)} samples to CSV.")
+print(f"Finished! Saved {len(df)} rows to CSV.")
