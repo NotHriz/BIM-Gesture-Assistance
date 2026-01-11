@@ -5,6 +5,7 @@ import pandas as pd
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+
 # 1. Setup the Hand Landmarker
 base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
 options = vision.HandLandmarkerOptions(
@@ -18,6 +19,10 @@ detector = vision.HandLandmarker.create_from_options(options)
 
 DATASET_PATH = 'App\data\mydatabase' # Update this to your folder
 output_data = []
+
+# Force Alphabetical Order
+labels = sorted([f for f in os.listdir(DATASET_PATH) if os.path.isdir(os.path.join(DATASET_PATH, f))])
+
 
 # 2. Loop through each folder (Word)
 for label in os.listdir(DATASET_PATH):
@@ -47,6 +52,14 @@ for label in os.listdir(DATASET_PATH):
             # Add the label (the word) to the end
             coords.append(label)
             output_data.append(coords)
+            
+    # 1. Add a "Noisy" version (simulates shaky hands)
+    noisy_coords = [c + np.random.normal(0, 0.005) for c in coords]
+    output_data.append(noisy_coords + [label])
+
+    # 2. Add a "Scaled" version (simulates closer/further hand)
+    scaled_coords = [c * 1.05 for c in coords]
+    output_data.append(scaled_coords + [label])
 
 # 4. Save to CSV
 df = pd.DataFrame(output_data)
