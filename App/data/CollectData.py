@@ -33,6 +33,12 @@ cap = cv2.VideoCapture(1) # Change to 0 if using built-in webcam
 print(f"\n🚀 Target: {word.upper()} | Starts in 3s...")
 time.sleep(3)
 
+# Create the window name first
+cv2.namedWindow('MSL Data Collection', cv2.WINDOW_AUTOSIZE)
+
+# Force the window to be the topmost/front window
+cv2.setWindowProperty('MSL Data Collection', cv2.WND_PROP_TOPMOST, 1)
+
 count = 0
 while count < SAMPLES_TO_COLLECT:
     ret, frame = cap.read()
