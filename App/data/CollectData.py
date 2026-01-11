@@ -28,7 +28,7 @@ existing_files = [f for f in os.listdir(word_folder) if f.endswith('.txt')]
 start_idx = len(existing_files)
 print(f"📂 Folder contains {start_idx} existing samples. Starting from sample_{start_idx}.txt")
 
-cap = cv2.VideoCapture(1) # Change to 0 if using built-in webcam
+cap = cv2.VideoCapture(0) # Change to 0 if using built-in webcam
 
 print(f"\n🚀 Target: {word.upper()} | Starts in 3s...")
 time.sleep(3)
