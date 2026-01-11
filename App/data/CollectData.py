@@ -2,15 +2,15 @@ import cv2
 import mediapipe as mp
 import os
 import time
+import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 # --- CONFIGURATION ---
 MODEL_PATH = 'hand_landmarker.task'
-SAVE_DIR = 'my_new_data'  # Teammates can send you this whole folder
-SAMPLES_TO_COLLECT = 100   # How many samples per word
+SAVE_DIR = 'my_new_data'
+SAMPLES_TO_COLLECT = 100 
 
-# 1. Setup MediaPipe
 base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
@@ -19,61 +19,69 @@ options = vision.HandLandmarkerOptions(
 )
 detector = vision.HandLandmarker.create_from_options(options)
 
-# 2. Get User Input
-word = input("Enter the Malay word you are signing (e.g., Makan): ").lower().strip()
+word = input("Enter the Malay word you are signing: ").lower().strip()
 word_folder = os.path.join(SAVE_DIR, word)
+os.makedirs(word_folder, exist_ok=True)
 
-if not os.path.exists(word_folder):
-    os.makedirs(word_folder)
+# 1. FIND STARTING INDEX (To prevent overwriting friend's data)
+existing_files = [f for f in os.listdir(word_folder) if f.endswith('.txt')]
+start_idx = len(existing_files)
+print(f"📂 Folder contains {start_idx} existing samples. Starting from sample_{start_idx}.txt")
 
-# 3. Start Camera
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(1) # Change to 0 if using built-in webcam
 
-print(f"\nTarget: {word.upper()}")
-print("Get ready! Recording starts in 3 seconds...")
-for i in range(3, 0, -1):
-    print(f"{i}...")
-    time.sleep(1)
-
-print("🚀 RECORDING STARTED!")
+print(f"\n🚀 Target: {word.upper()} | Starts in 3s...")
+time.sleep(3)
 
 count = 0
 while count < SAMPLES_TO_COLLECT:
     ret, frame = cap.read()
     if not ret: break
     
-    frame = cv2.flip(frame, 1) # Mirror for natural feel
+    frame = cv2.flip(frame, 1)
     h, w, _ = frame.shape
     
-    # MediaPipe Processing
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     res = detector.detect_for_video(mp_image, int(time.time() * 1000))
 
-    if res.hand_landmarks:
-        # 1. Prepare a list to hold ALL coordinates (start with zeros for 2 hands = 84 points)
-        all_coords = [0.0] * 84 
-        
-        # 2. Loop through detected hands (up to 2)
-        for hand_idx, landmarks in enumerate(res.hand_landmarks):
-            if hand_idx >= 2: break # Safety check
-            
-            # Fill the correct slot in our 84-point list
-            # Hand 0 fills index 0-41 | Hand 1 fills index 42-83
-            start_offset = hand_idx * 42
-            for i, lm in enumerate(landmarks):
-                all_coords[start_offset + (i * 2)] = lm.x
-                all_coords[start_offset + (i * 2) + 1] = lm.y
+    # --- MID-POINT PAUSE LOGIC ---
+    if count == 50:
+        cv2.putText(frame, "PAUSED: CHANGE POSITION", (50, h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+        cv2.imshow('MSL Data Collection', frame)
+        cv2.waitKey(3000) # 3-second pause
+        count += 1 # Move past the pause trigger
 
-            # 3. Draw dots for EVERY hand detected
-            for lm in landmarks:
+    # --- COLLECTION LOGIC ---
+    if res.hand_landmarks:
+        all_coords = [0.0] * 84 
+        for hand_idx, landmarks in enumerate(res.hand_landmarks):
+            if hand_idx >= 2: break
+            offset = hand_idx * 42
+            for i, lm in enumerate(landmarks):
+                all_coords[offset + (i * 2)] = lm.x
+                all_coords[offset + (i * 2) + 1] = lm.y
                 cv2.circle(frame, (int(lm.x*w), int(lm.y*h)), 3, (0, 255, 0), -1)
 
-        # 4. Save the full 84-point string to the file
+        # Save using start_idx to ensure uniqueness
         coords_str = ",".join([str(c) for c in all_coords])
-        file_path = os.path.join(word_folder, f"sample_{count}.txt")
+        file_path = os.path.join(word_folder, f"sample_{start_idx + count}.txt")
         with open(file_path, "w") as f:
             f.write(coords_str)
+        
+        count += 1
+        print(f"Progress: {count}/{SAMPLES_TO_COLLECT}", end="\r")
 
-print(f"\n✅ Finished! 100 samples saved in {word_folder}")
+    else:
+        # Show warning if hand is missing so user knows why it's not collecting
+        cv2.putText(frame, "NO HAND DETECTED", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    # --- UI UPDATE (ALWAYS RUNS) ---
+    cv2.putText(frame, f"Collected: {count}/{SAMPLES_TO_COLLECT}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+    cv2.imshow('MSL Data Collection', frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+print(f"\n✅ Done! Added {count} samples to {word_folder}")
 cap.release()
 cv2.destroyAllWindows()

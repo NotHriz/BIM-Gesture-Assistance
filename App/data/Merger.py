@@ -1,65 +1,61 @@
 import os
-import cv2
 import pandas as pd
-import numpy as np
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+import time
 
 # --- SETTINGS ---
-DATASET_PATH = 'App/data/mydatabase'
-OUTPUT_CSV = 'malay_sign_lang_coords.csv'
-MODEL_ASSET_PATH = 'hand_landmarker.task'
+EXISTING_CSV = 'malay_sign_lang_coords.csv'
+NEW_DATA_DIR = 'my_new_data'
+OUTPUT_CSV = 'malay_sign_lang_coords.csv' # Overwriting the same file with combined data
 
-# Initialize MediaPipe for the images
-base_options = python.BaseOptions(model_asset_path=MODEL_ASSET_PATH)
-options = vision.HandLandmarkerOptions(
-    base_options=base_options,
-    running_mode=vision.RunningMode.IMAGE,
-    num_hands=2
-)
-detector = vision.HandLandmarker.create_from_options(options)
+start_time = time.time()
+new_rows = []
 
-all_rows = []
-words = sorted([f for f in os.listdir(DATASET_PATH) if os.path.isdir(os.path.join(DATASET_PATH, f))])
+# 1. Load the existing data (the 3,000 images you already processed)
+if os.path.exists(EXISTING_CSV):
+    print(f"📖 Loading existing dataset: {EXISTING_CSV}")
+    df_existing = pd.read_csv(EXISTING_CSV, header=None)
+    print(f"✅ Found {len(df_existing)} existing samples.")
+else:
+    print("⚠️ No existing CSV found. Starting a fresh one.")
+    df_existing = pd.DataFrame()
 
-for word in words:
-    word_folder = os.path.join(DATASET_PATH, word)
-    count = 0
+# 2. Process ONLY the new .txt files from teammates
+if os.path.exists(NEW_DATA_DIR):
+    words = [f for f in os.listdir(NEW_DATA_DIR) if os.path.isdir(os.path.join(NEW_DATA_DIR, f))]
     
-    for filename in os.listdir(word_folder):
-        file_path = os.path.join(word_folder, filename)
-        all_coords_84 = [0.0] * 84
-        found_hand = False
+    for word in words:
+        word_folder = os.path.join(NEW_DATA_DIR, word)
+        files = [f for f in os.listdir(word_folder) if f.endswith('.txt')]
+        print(f"📂 Extracting {len(files)} new samples for: {word}")
+        
+        for filename in files:
+            file_path = os.path.join(word_folder, filename)
+            try:
+                with open(file_path, 'r') as f:
+                    # Convert text "0.1, 0.2..." into a list of floats
+                    coords = [float(x) for x in f.read().strip().split(',')]
+                    if len(coords) == 84:
+                        new_rows.append(coords + [word.lower()])
+            except Exception as e:
+                print(f"❌ Error reading {filename}: {e}")
 
-        # CASE A: Processing teammate's .txt files
-        if filename.endswith(".txt"):
-            with open(file_path, 'r') as f:
-                coords = [float(x) for x in f.read().strip().split(',')]
-                if len(coords) == 84:
-                    all_coords_84 = coords
-                    found_hand = True
-
-        # CASE B: Processing your original .jpg/.png images
-        elif filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-            image = cv2.imread(file_path)
-            if image is None: continue
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            res = detector.detect(mp_image)
-            
-            if res.hand_landmarks:
-                found_hand = True
-                for i, hand_lms in enumerate(res.hand_landmarks):
-                    if i >= 2: break
-                    offset = i * 42
-                    for j, lm in enumerate(hand_lms):
-                        all_coords_84[offset + (j * 2)] = lm.x
-                        all_coords_84[offset + (j * 2) + 1] = lm.y
-
-        if found_hand:
-            all_rows.append(all_coords_84 + [word])
-            count += 1
-
-# Save final master file
-df = pd.DataFrame(all_rows)
-df.to_csv(OUTPUT_CSV, index=False, header=False)
-print(f"🚀 Master Dataset Created: {len(df)} samples from images AND text files.")
+# 3. Combine and Save
+if new_rows:
+    df_new = pd.DataFrame(new_rows)
+    # Combine old and new
+    df_final = pd.concat([df_existing, df_new], ignore_index=True)
+    
+    # Remove potential duplicates (in case you ran this twice)
+    df_final = df_final.drop_duplicates()
+    
+    df_final.to_csv(OUTPUT_CSV, index=False, header=False)
+    
+    print("\n" + "="*30)
+    print(f"🚀 MERGE COMPLETE!")
+    print(f"📈 Old Samples: {len(df_existing)}")
+    print(f"➕ New Samples Added: {len(new_rows)}")
+    print(f"📊 Total Dataset Size: {len(df_final)}")
+    print(f"⏱️ Time Taken: {time.time() - start_time:.2f} seconds")
+    print("="*30)
+else:
+    print("ℹ️ No new text data found to append.")

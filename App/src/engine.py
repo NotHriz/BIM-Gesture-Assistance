@@ -75,11 +75,7 @@ class GestureEngine:
             probs = self.model.predict_proba([all_coords_84])[0]
             confidence = max(probs)
 
-            # Threshold: If AI is guessing with less than 60% confidence, don't show it
-            if confidence < 0.60:
-                prediction_str = "Analyzing..."
-            else:
-                prediction_str = f"{prediction_label} ({confidence:.2%})"
+            prediction_str = f"{prediction_label} ({confidence:.2%})"
                 
         except Exception as e:
             print("Classification error:", e)
