@@ -1,0 +1,24 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OpenCV/MediaPipe temporary files
+.ipynb_checkpoints/
+
+# Data and Models (Optional: keep these local if they are large)
+*.csv
+*.pkl
+*.h5
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# VS Code settings
+.vscode/
