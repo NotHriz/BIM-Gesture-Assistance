@@ -4,13 +4,14 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import joblib
+import time
 
 class GestureEngine:
     def __init__(self):
-        # 1. Load the "Brain"
+        # 1. Load the "Brain" (Expects 84 features)
         self.model = joblib.load('App/models/msl_gesture_rf.joblib')
         
-        # 2. Load the "Dictionary" (The labels we just discussed!)
+        # 2. Load the "Dictionary"
         self.labels = joblib.load('App/models/classes.joblib')
         
         # 3. Setup MediaPipe
@@ -21,25 +22,16 @@ class GestureEngine:
             num_hands=2
         )
         self.detector = vision.HandLandmarker.create_from_options(options)
-    
-    
+
     def process_frame(self, frame, timestamp_ms):
         """
-        Run MediaPipe detection, produce features for the classifier, and return:
-          - landmarks: list of hands, each hand is a list of (x_norm, y_norm) tuples
-                       (normalized coordinates in [0..1], relative to image width/height)
-                       Example: [ [(x1,y1),(x2,y2),...],  # hand 0
-                                  [(x1,y1),...] ]       # hand 1 (if any)
-                     If no hands detected returns [].
-          - prediction: formatted string like "Label (NN.NN%)"
-        
-        Notes:
-        - The classifier expects a flattened list [x1,y1,x2,y2,...] for a single hand;
-          here we use the first detected hand for prediction to preserve existing behavior.
-        - Returning normalized landmarks allows the GUI to draw skeletons at any resolution.
+        Processes frame for 2-hand MSL recognition.
+        Returns:
+            - hands_landmarks: For GUI drawing
+            - prediction_str: The translated word
         """
         try:
-            # Convert frame for MediaPipe (SRGB)
+            # Convert frame for MediaPipe
             mp_image = mp.Image(
                 image_format=mp.ImageFormat.SRGB,
                 data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -48,36 +40,49 @@ class GestureEngine:
             # Detect landmarks
             result = self.detector.detect_for_video(mp_image, timestamp_ms)
         except Exception as e:
-            # If MediaPipe fails for any reason, return no landmarks and an error label
             print("MediaPipe detection error:", e)
             return [], f"Error: {e}"
 
         if not result.hand_landmarks:
-            return [], "No Hand"
+            return [], "No Hand Detected"
 
-        # Collect landmarks for all detected hands (normalized coords)
-        hands_landmarks = []
-        flattened_coords_per_hand = []
-        for hand_landmarks in result.hand_landmarks:
-            coords_flat = []
-            landmarks_norm = []
-            for lm in hand_landmarks:
-                coords_flat.extend([lm.x, lm.y])
-                landmarks_norm.append((lm.x, lm.y))
-            flattened_coords_per_hand.append(coords_flat)
-            hands_landmarks.append(landmarks_norm)
+        # --- COORDINATE PROCESSING ---
+        hands_landmarks_for_gui = []
+        # Pre-fill 84 zeros (42 for Hand 1 + 42 for Hand 2)
+        all_coords_84 = [0.0] * 84 
 
-        # Use the first detected hand for prediction (keeps compatibility with existing model)
+        # Loop through detected hands (MediaPipe returns up to 2)
+        for i, hand_landmarks in enumerate(result.hand_landmarks):
+            if i >= 2: break  # Safety cap
+            
+            offset = i * 42
+            current_hand_gui = []
+            
+            for j, lm in enumerate(hand_landmarks):
+                # 1. Fill the 84-feature list for the Random Forest
+                all_coords_84[offset + (j * 2)] = lm.x
+                all_coords_84[offset + (j * 2) + 1] = lm.y
+                
+                # 2. Fill the list for the GUI skeleton drawing
+                current_hand_gui.append((lm.x, lm.y))
+                
+            hands_landmarks_for_gui.append(current_hand_gui)
+
+        # --- CLASSIFICATION ---
         try:
-            coords_for_model = flattened_coords_per_hand[0]
-            prediction_label = self.model.predict([coords_for_model])[0]
-            probs = self.model.predict_proba([coords_for_model])[0]
+            # Predict using the padded 84-feature list
+            prediction_label = self.model.predict([all_coords_84])[0]
+            probs = self.model.predict_proba([all_coords_84])[0]
             confidence = max(probs)
-            prediction_str = f"{prediction_label} ({confidence:.2%})"
-        except Exception as e:
-            # If classifier fails, still return landmarks so GUI can draw the skeleton
-            print("Classification error:", e)
-            prediction_str = f"Error: {e}"
 
-        # Return list of hands' normalized landmarks and the prediction string
-        return hands_landmarks, prediction_str
+            # Threshold: If AI is guessing with less than 60% confidence, don't show it
+            if confidence < 0.60:
+                prediction_str = "Analyzing..."
+            else:
+                prediction_str = f"{prediction_label} ({confidence:.2%})"
+                
+        except Exception as e:
+            print("Classification error:", e)
+            prediction_str = "Model Error"
+
+        return hands_landmarks_for_gui, prediction_str
